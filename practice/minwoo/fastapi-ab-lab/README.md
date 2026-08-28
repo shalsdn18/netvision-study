@@ -169,10 +169,11 @@ A→B→C 전체 체인을 거친 요청(`path: ["A","B","C"]`)이 모두 구분
 ## 우선순위 4: 로컬 Ollama 연동
 
 `app_b`에 Ollama 호출용 엔드포인트 3개를 추가했습니다 (파일: `app_b/main.py`).
-Ollama 주소/모델은 환경 변수로 바꿀 수 있습니다.
+Ollama 주소와 모델은 환경 변수로 바꿀 수 있습니다.
 
 - `OLLAMA_URL` (기본값 `http://localhost:11434`)
-- `OLLAMA_MODEL` (기본값 `llama3.1:8b`)
+- `OLLAMA_MODEL` (기본값 `qwen2.5:7b-instruct-q4_K_M`)
+- `OLLAMA_EMBED_MODEL` (기본값 `nomic-embed-text:latest`)
 
 | Method | Path | 설명 |
 |---|---|---|
@@ -180,32 +181,32 @@ Ollama 주소/모델은 환경 변수로 바꿀 수 있습니다.
 | POST | `/llm/generate` | Ollama의 `/api/generate` 호출 (`{"prompt": "..."}`) |
 | POST | `/llm/chat` | Ollama의 `/api/chat` 호출 (`{"messages": [{"role":"user","content":"..."}]}`) |
 
-### 실행 전 준비 (이 컴퓨터에서 직접)
-
-> 참고: 이 코드는 Claude와 연결된 브리지 환경(네트워크가 제한됨)이 아니라,
-> 사용자님의 실제 터미널(PowerShell/명령 프롬프트 등)에서 실행해야
-> localhost의 Ollama에 접속할 수 있습니다.
+### 실행 전 준비
 
 1. Ollama가 이미 설치되어 있는지 확인 (홈 폴더에 `.ollama`가 있는 것으로 보아 설치되어 있을 가능성이 높습니다):
    ```
    ollama --version
    ```
-2. 모델을 하나 받습니다 (약 4.9GB, 디스크 여유 공간 확인):
+2. 생성 모델과 임베딩 모델을 받습니다:
    ```
-   ollama pull llama3.1:8b
+   ollama pull qwen2.5:7b-instruct-q4_K_M
+   ollama pull nomic-embed-text
    ```
 3. Ollama 서버 실행 확인 (보통 설치 시 자동으로 백그라운드 실행됨):
    ```
    curl http://localhost:11434/api/tags
    ```
-4. 이 프로젝트 의존성 설치:
-   ```
+4. PowerShell에서 프로젝트 가상환경과 의존성을 준비합니다:
+   ```powershell
    cd fastapi-ab-lab
-   pip install -r requirements.txt
+   py -3.13 -m venv .venv
+   .\.venv\Scripts\python.exe -m pip install -r requirements.txt
    ```
 5. 서비스 B 실행:
-   ```
-   uvicorn app_b.main:app --reload --port 8002
+   ```powershell
+   $env:OLLAMA_URL="http://127.0.0.1:11434"
+   $env:OLLAMA_MODEL="qwen2.5:7b-instruct-q4_K_M"
+   .\.venv\Scripts\python.exe -m uvicorn app_b.main:app --port 8002
    ```
 
 ### 테스트
@@ -226,14 +227,41 @@ curl -X POST http://127.0.0.1:8002/llm/chat -H "Content-Type: application/json" 
 (Windows `cmd`에서 여러 줄 명령은 줄 끝에 `^`를 붙이거나, PowerShell에서는
 `curl.exe`로 한 줄에 붙여서 실행하세요.)
 
-문법 검증은 완료했습니다 (`python -m py_compile app_b/main.py` 통과).
-다만 실제 Ollama 응답 테스트는 브리지 셸에서 로컬 네트워크(11434 포트)에
-접근할 수 없어 대신 진행하지 못했습니다 — 위 curl 명령을 직접 실행해보시고
-결과를 알려주시면 이어서 확인하겠습니다.
+실제 `/llm/generate` 호출에서 Qwen 모델의 한국어 응답과 `200 OK`를 확인했습니다.
 
-## 다음 단계 (로드맵 우선순위 5)
+## 우선순위 5: 7B 양자화 모델 확인
 
-`/llm/models`로 받아둔 모델 목록을 확인하면서 `ollama pull`로 7B~8B급
-다른 양자화 모델(mistral:7b, qwen2.5:7b 등)을 추가로 받아 `OLLAMA_MODEL`
-환경 변수나 각 요청의 `"model"` 필드를 바꿔가며 실행 가능 여부와 응답
-속도를 비교하면 우선순위 5 산출물이 됩니다.
+`qwen2.5:7b-instruct-q4_K_M`은 7.6B 매개변수의 Q4_K_M 양자화 모델입니다.
+CPU 실행으로 한국어 49토큰을 생성했으며 실제 생성 속도는 약 5.8 tokens/s였습니다.
+
+## 우선순위 6: 로컬 문서 기반 RAG
+
+서비스 B는 `data/documents` 아래의 `.md`, `.txt` 문서를 검색합니다.
+`nomic-embed-text`로 문서와 질문을 임베딩하고 코사인 유사도가 높은 문서 조각을
+Qwen에 전달합니다. 별도 벡터 DB 없이 메모리에 색인을 보관하며, 서버를 다시
+시작한 뒤 첫 질문에서는 문서를 자동으로 다시 색인합니다.
+
+| Method | Path | 설명 |
+|---|---|---|
+| POST | `/rag/index` | 로컬 문서를 읽고 검색 색인을 다시 생성 |
+| POST | `/rag/ask` | 관련 문서를 검색하고 근거 기반 답변과 출처 반환 |
+
+Swagger(`http://127.0.0.1:8002/docs`)에서 먼저 `POST /rag/index`를 실행한 뒤
+다음 요청으로 질의할 수 있습니다.
+
+```json
+{
+  "question": "카메라 영상이 나오지 않으면 어떤 순서로 확인해야 하나요?",
+  "top_k": 3
+}
+```
+
+응답의 `sources`에는 답변에 사용한 파일명, 문서 조각 번호, 유사도 점수와
+내용 일부가 포함됩니다. `data/documents`의 기본 자료는 기능 검증용 예시이며
+실제 회사 규정이 아닙니다.
+
+실제 검증에서는 문서 2개를 2개 조각으로 색인한 뒤 "카메라 영상이 나오지
+않으면 어떤 순서로 확인해야 하나요?"라고 질문했습니다. 응답은 학습용 문서의
+전원 표시등, 랜 케이블, Ping, 554번 포트, 재시작 순서를 답하고
+`camera_troubleshooting.md`를 출처로 표시했습니다. 첫 질의는 모델 전환과
+로딩을 포함해 약 84.9초가 걸렸고 생성 속도는 약 4.62 tokens/s였습니다.

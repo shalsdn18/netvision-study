@@ -11,9 +11,8 @@ App B - FastAPI 서비스 B
     uvicorn app_b.main:app --reload --port 8002
 
 서비스 B는 "무언가를 처리해주는" 워커 역할을 맡습니다.
-지금은 텍스트를 간단히 변환하는 /process 엔드포인트지만,
-우선순위 4~5 단계에서 이 로직을 Ollama 로컬 LLM 호출로
-교체할 수 있도록 설계했습니다.
+/process의 간단한 문자열 처리와 함께 Ollama 로컬 LLM 호출,
+로컬 문서 기반 RAG 엔드포인트를 제공합니다.
 
 서비스 C의 주소는 환경 변수 SERVICE_C_URL로 바꿀 수 있습니다
 (기본값: http://127.0.0.1:8003).
@@ -21,17 +20,31 @@ App B - FastAPI 서비스 B
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from typing import Optional
 
 import httpx
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+
+from app_b.rag import LocalRagService, RagServiceError
 
 SERVICE_C_URL = os.environ.get("SERVICE_C_URL", "http://127.0.0.1:8003")
 
 # 우선순위 4: 로컬 Ollama 서버 연동
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
-OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "llama3.1:8b")
+OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen2.5:7b-instruct-q4_K_M")
+OLLAMA_EMBED_MODEL = os.environ.get(
+    "OLLAMA_EMBED_MODEL", "nomic-embed-text:latest"
+)
+DOCUMENTS_DIR = Path(__file__).resolve().parents[1] / "data" / "documents"
+
+rag_service = LocalRagService(
+    documents_dir=DOCUMENTS_DIR,
+    ollama_url=OLLAMA_URL,
+    generation_model=OLLAMA_MODEL,
+    embedding_model=OLLAMA_EMBED_MODEL,
+)
 
 app = FastAPI(
     title="Service B",
@@ -75,7 +88,7 @@ def health():
 
 @app.post("/process", response_model=ProcessResponse)
 def process(req: ProcessRequest):
-    """지금은 간단한 문자열 변환. 추후 Ollama /generate 호출로 교체 예정."""
+    """REST 호출 연습을 위한 간단한 문자열 변환."""
     return ProcessResponse(
         original=req.text,
         result=req.text.upper(),
@@ -112,7 +125,7 @@ def list_items():
 
 class PipelineRequest(BaseModel):
     text: str
-    path: list[str] = []  # 지금까지 이 요청이 거쳐온 서비스 경로
+    path: list[str] = Field(default_factory=list)
 
 
 @app.post("/pipeline")
@@ -236,3 +249,30 @@ async def llm_chat(req: ChatRequest):
         "message": data.get("message"),
         "raw": data,
     }
+
+
+# ---------------------------------------------------------------------------
+# 우선순위 6: 로컬 문서 기반 RAG
+# ---------------------------------------------------------------------------
+
+class RagAskRequest(BaseModel):
+    question: str = Field(min_length=1)
+    top_k: int = Field(default=3, ge=1, le=5)
+
+
+@app.post("/rag/index")
+async def rag_index():
+    """data/documents의 로컬 문서를 읽고 메모리 검색 색인을 만든다."""
+    try:
+        return await rag_service.rebuild_index()
+    except RagServiceError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@app.post("/rag/ask")
+async def rag_ask(req: RagAskRequest):
+    """관련 문서 조각을 검색한 뒤 Qwen으로 근거 기반 답변을 생성한다."""
+    try:
+        return await rag_service.ask(req.question, req.top_k)
+    except RagServiceError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc

@@ -32,14 +32,7 @@ python -m uvicorn app_a:app --reload --port 8000
 - 카메라 IP Ping 확인
 - 지정 포트 연결 확인
 
-현재 정리가 필요한 사항은 다음과 같습니다.
-
-- `main.py`에 `/cameras/{camera_id}/port-check` 라우트가 두 번 정의되어 있음
-- `requirements.txt`에 실제 필수 패키지인 `fastapi`, `uvicorn`, `sqlalchemy`가 누락되어 있음
-- 현재 코드에서 사용하지 않는 `openai`, `httpx`가 `requirements.txt`에 포함되어 있음
-- 새 DB에서 테이블을 생성하는 초기화 또는 마이그레이션 코드가 없음
-- `models_backup.py`, `schemas_backup.py`는 현재 파일과 내용이 같아 중복 상태임
-- `cameras.db`와 백업 파일을 Git에 포함할지 결정이 필요함
+애플리케이션을 시작하면 필요한 SQLite 테이블을 자동으로 생성합니다. 데이터베이스 경로는 실행 위치와 관계없이 프로젝트 폴더의 `cameras.db`를 사용하며, 테스트나 별도 환경에서는 `CAMERA_DATABASE_URL` 환경 변수로 변경할 수 있습니다. 샘플 카메라 데이터를 공유하기 위해 현재 `cameras.db`는 저장소에 유지합니다.
 
 전용 가상환경을 사용할 경우 프로젝트 폴더에서 다음과 같이 실행합니다.
 
@@ -56,6 +49,7 @@ cd practice/minwoo/fastapi-study
 - 서비스 B: 텍스트 처리, 서비스 C 호출, Ollama 연동
 - 서비스 C: 처리 결과 저장
 - 전체 호출 흐름: A → B → C
+- 로컬 RAG: 문서 임베딩, 유사도 검색, Qwen 근거 기반 답변과 출처 반환
 
 자세한 실행 방법과 엔드포인트는 [`fastapi-ab-lab/README.md`](./fastapi-ab-lab/README.md)를 참고합니다.
 
