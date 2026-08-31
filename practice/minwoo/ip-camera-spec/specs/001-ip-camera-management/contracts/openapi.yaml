@@ -1,0 +1,231 @@
+openapi: 3.0.3
+info:
+  title: IP Camera Management API
+  version: 1.0.0
+  description: REST API for managing IP cameras and checking network reachability.
+paths:
+  /cameras:
+    post:
+      summary: Register a camera
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CameraInput'
+            example:
+              cameraId: lobby-1
+              cameraName: Main Lobby
+              ipAddress: 192.168.10.20
+      responses:
+        '201':
+          description: Camera created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Camera'
+              example:
+                cameraId: lobby-1
+                cameraName: Main Lobby
+                ipAddress: 192.168.10.20
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '409':
+          $ref: '#/components/responses/DuplicateCamera'
+    get:
+      summary: List cameras
+      responses:
+        '200':
+          description: Camera list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Camera'
+              example:
+                - cameraId: lobby-1
+                  cameraName: Main Lobby
+                  ipAddress: 192.168.10.20
+  /cameras/{cameraId}:
+    parameters:
+      - $ref: '#/components/parameters/CameraId'
+    get:
+      summary: Get a camera
+      responses:
+        '200':
+          description: Camera details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Camera'
+              example:
+                cameraId: lobby-1
+                cameraName: Main Lobby
+                ipAddress: 192.168.10.20
+        '404':
+          $ref: '#/components/responses/CameraNotFound'
+    put:
+      summary: Update a camera
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CameraUpdate'
+            example:
+              cameraName: Renovated Lobby
+              ipAddress: 192.168.10.21
+      responses:
+        '200':
+          description: Camera updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Camera'
+              example:
+                cameraId: lobby-1
+                cameraName: Renovated Lobby
+                ipAddress: 192.168.10.21
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '404':
+          $ref: '#/components/responses/CameraNotFound'
+    delete:
+      summary: Delete a camera
+      responses:
+        '204':
+          description: Camera deleted
+        '404':
+          $ref: '#/components/responses/CameraNotFound'
+  /cameras/{cameraId}/diagnostics/ping:
+    parameters:
+      - $ref: '#/components/parameters/CameraId'
+    post:
+      summary: Ping a camera IP address
+      responses:
+        '200':
+          description: Ping diagnostic result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DiagnosticResult'
+        '404':
+          $ref: '#/components/responses/CameraNotFound'
+  /cameras/{cameraId}/diagnostics/tcp:
+    parameters:
+      - $ref: '#/components/parameters/CameraId'
+    post:
+      summary: Check a TCP port
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [port]
+              additionalProperties: false
+              properties:
+                port:
+                  type: integer
+                  minimum: 1
+                  maximum: 65535
+      responses:
+        '200':
+          description: TCP diagnostic result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DiagnosticResult'
+        '400':
+          $ref: '#/components/responses/InvalidInput'
+        '404':
+          $ref: '#/components/responses/CameraNotFound'
+components:
+  parameters:
+    CameraId:
+      name: cameraId
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 1
+  schemas:
+    CameraInput:
+      type: object
+      required: [cameraId, cameraName, ipAddress]
+      additionalProperties: false
+      properties:
+        cameraId:
+          type: string
+          minLength: 1
+        cameraName:
+          type: string
+          minLength: 1
+        ipAddress:
+          type: string
+          pattern: '^(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])(\\.(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])){3}$'
+    CameraUpdate:
+      type: object
+      required: [cameraName, ipAddress]
+      additionalProperties: false
+      properties:
+        cameraName:
+          type: string
+          minLength: 1
+        ipAddress:
+          type: string
+          pattern: '^(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])(\\.(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])){3}$'
+    Camera:
+      allOf:
+        - $ref: '#/components/schemas/CameraInput'
+    DiagnosticResult:
+      type: object
+      required: [cameraId, diagnosticType, status]
+      properties:
+        cameraId:
+          type: string
+        diagnosticType:
+          type: string
+          enum: [ping, tcp-port]
+        status:
+          type: string
+          enum: [success, failure, timeout]
+        port:
+          type: integer
+        latencyMs:
+          type: integer
+          minimum: 0
+        message:
+          type: string
+    ApiError:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        fieldErrors:
+          type: object
+          additionalProperties:
+            type: string
+  responses:
+    InvalidInput:
+      description: Request validation failed
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    DuplicateCamera:
+      description: Camera ID already exists
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    CameraNotFound:
+      description: Camera does not exist
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
