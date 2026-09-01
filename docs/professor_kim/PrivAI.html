@@ -1,0 +1,454 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1" />
+  <title>PrivAI v0.1</title>
+  <meta name="description" content="PrivAI Web v0.1 - Local Document Search" />
+  <style>
+    :root{
+      --bg:#f6f7f9;--card:#fff;--text:#111827;--muted:#6b7280;--line:#d1d5db;
+      --accent:#111827;--accent2:#2563eb;--danger:#b91c1c;--ok:#047857;--warn:#b45309;
+      font-family: system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Noto Sans KR",Arial,sans-serif;
+    }
+    *{box-sizing:border-box}
+    body{margin:0;background:var(--bg);color:var(--text);font-size:16px;line-height:1.55}
+    .wrap{max-width:980px;margin:0 auto;padding:18px 14px 72px}
+    header{padding:18px 0 12px}
+    h1{font-size:34px;line-height:1.1;margin:0 0 4px;font-weight:800;letter-spacing:-.03em}
+    h2{font-size:24px;margin:20px 0 10px;letter-spacing:-.02em}
+    h3{font-size:18px;margin:14px 0 8px}
+    .sub{font-size:17px;color:#374151;margin:0 0 10px}
+    .notice{background:#eef2ff;border:1px solid #c7d2fe;border-radius:12px;padding:10px 12px;margin:12px 0;color:#1e1b4b}
+    .tabs{display:flex;gap:6px;flex-wrap:wrap;margin:10px 0 14px;position:sticky;top:0;background:rgba(246,247,249,.95);backdrop-filter:blur(8px);padding:8px 0;z-index:5}
+    button,.btn{border:1px solid var(--line);background:#fff;color:var(--text);border-radius:10px;padding:9px 12px;font-size:15px;cursor:pointer;min-height:40px}
+    button:hover{border-color:#9ca3af;background:#f9fafb}
+    button.primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+    button.blue{background:var(--accent2);color:#fff;border-color:var(--accent2)}
+    button.danger{background:#fff;color:var(--danger);border-color:#fecaca}
+    button:disabled{opacity:.5;cursor:not-allowed}
+    .tab.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+    .panel{display:none}.panel.active{display:block}
+    .card{background:var(--card);border:1px solid #e5e7eb;border-radius:16px;padding:14px;margin:12px 0;box-shadow:0 1px 2px rgba(0,0,0,.03)}
+    .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+    .grow{flex:1 1 auto}.full{width:100%}
+    input,textarea,select{border:1px solid var(--line);border-radius:10px;padding:10px 12px;font-size:16px;background:#fff;color:var(--text)}
+    textarea{min-height:92px;resize:vertical}
+    .small{font-size:13px;color:var(--muted)}
+    .status{font-size:14px;padding:8px 10px;border-radius:10px;background:#f3f4f6;color:#374151;margin-top:8px;white-space:pre-wrap}
+    .status.ok{background:#ecfdf5;color:#065f46}.status.warn{background:#fffbeb;color:#92400e}.status.err{background:#fef2f2;color:#991b1b}
+    .list{display:grid;gap:8px}
+    .item{background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:10px}
+    .item-title{font-weight:700;word-break:break-word}
+    .meta{font-size:13px;color:var(--muted);margin-top:3px}
+    .result{border-left:4px solid var(--accent2);padding-left:10px;margin:10px 0}
+    mark{background:#fef3c7;border-radius:3px;padding:0 2px}
+    .hidden{display:none!important}
+    .pill{display:inline-block;border:1px solid #e5e7eb;background:#f9fafb;border-radius:999px;padding:3px 8px;font-size:12px;color:#4b5563;margin:2px}
+    .footer-note{margin-top:16px;color:#6b7280;font-size:13px}
+    @media(max-width:600px){.wrap{padding:12px 10px 64px}h1{font-size:30px}.tabs button{flex:1 1 auto}.row.stack>*{width:100%}}
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>PrivAI</h1>
+    <p class="sub">Local Document Search v0.1 · 단일 HTML 파일</p>
+    <div class="notice"><b>Local-first:</b> v0.1은 문서 원문과 질문을 외부 서버로 보내지 않습니다. LLM 답변 대신 로컬 문서 청크를 검색해 근거 문단을 보여줍니다.</div>
+  </header>
+
+  <nav class="tabs" aria-label="tabs">
+    <button class="tab active" data-tab="chat">Chat</button>
+    <button class="tab" data-tab="documents">Documents</button>
+    <button class="tab" data-tab="workspace">Workspace</button>
+    <button class="tab" data-tab="models">Models</button>
+    <button class="tab" data-tab="settings">Settings</button>
+  </nav>
+
+  <section id="chat" class="panel active">
+    <h2>Chat</h2>
+    <p>색인된 로컬 문서를 키워드로 검색하고 근거 문단을 확인합니다.</p>
+    <div class="card">
+      <div class="row stack">
+        <label>Workspace</label>
+        <select id="workspaceSelect"></select>
+        <button id="refreshStatsBtn">통계 새로고침</button>
+      </div>
+      <div class="status" id="statsBox">초기화 중...</div>
+      <textarea id="queryInput" class="full" placeholder="질문 또는 검색어를 입력하세요. 예: AI 디자인 프로세스 재정립"></textarea>
+      <div class="row">
+        <button id="searchBtn" class="primary">검색</button>
+        <button id="clearResultsBtn">결과 지우기</button>
+      </div>
+      <div class="small">v0.1은 LLM 답변 대신, 질문과 관련된 로컬 문서 청크를 검색해 보여줍니다.</div>
+    </div>
+    <div id="searchStatus" class="status hidden"></div>
+    <div id="results" class="list"></div>
+  </section>
+
+  <section id="documents" class="panel">
+    <h2>Documents</h2>
+    <p>PC/Android Chrome에서는 폴더 선택을 우선 사용합니다. 지원하지 않는 브라우저는 파일 추가를 사용하십시오.</p>
+    <div class="card">
+      <div class="row">
+        <button id="pickFolderBtn" class="blue">문서 폴더 추가</button>
+        <label class="btn" for="fileInput">파일 추가</label>
+        <input id="fileInput" type="file" multiple accept=".txt,.md,.csv,.html,.htm,.pdf,.docx,text/*,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" class="hidden" />
+        <button id="listDocsBtn">문서 목록 새로고침</button>
+        <button id="clearDocsBtn" class="danger">현재 Workspace 색인 삭제</button>
+      </div>
+      <div class="small" style="margin-top:8px">순수 오프라인 파싱: TXT/MD/CSV/HTML. PDF/DOCX는 인터넷 연결 시 CDN 라이브러리(PDF.js, Mammoth)를 자동 로드합니다.</div>
+      <div id="docStatus" class="status">대기 중</div>
+    </div>
+    <div id="docList" class="list"></div>
+  </section>
+
+  <section id="workspace" class="panel">
+    <h2>Workspace</h2>
+    <div class="card">
+      <div class="row stack">
+        <input id="newWorkspaceName" class="grow" placeholder="새 Workspace 이름" />
+        <button id="addWorkspaceBtn" class="primary">추가</button>
+        <button id="deleteWorkspaceBtn" class="danger">현재 Workspace 삭제</button>
+      </div>
+      <div class="status" id="workspaceStatus">기본 Workspace를 사용합니다.</div>
+    </div>
+    <div id="workspaceList" class="list"></div>
+  </section>
+
+  <section id="models" class="panel">
+    <h2>Models</h2>
+    <div class="card">
+      <h3>v0.1 모델 상태</h3>
+      <p>동결 규격상 v0.1은 LLM/임베딩 모델을 사용하지 않습니다.</p>
+      <span class="pill">v0.2: Transformers.js 임베딩</span>
+      <span class="pill">v0.3: WebLLM 로컬 답변</span>
+      <div id="capabilityBox" class="status"></div>
+    </div>
+  </section>
+
+  <section id="settings" class="panel">
+    <h2>Settings</h2>
+    <div class="card">
+      <h3>보안 원칙</h3>
+      <p>문서 원문과 질문은 기본적으로 외부 서버로 전송하지 않습니다. 현재 단일 HTML v0.1은 외부 API 호출 기능이 없습니다.</p>
+      <button id="exportBtn">현재 Workspace JSON 내보내기</button>
+      <button id="resetAllBtn" class="danger">전체 로컬 데이터 삭제</button>
+      <div id="settingsStatus" class="status">대기 중</div>
+    </div>
+    <div class="footer-note">권장 실행: 파일을 직접 열어도 동작하지만, PC에서는 <code>python -m http.server 8080</code>으로 실행하면 폴더 접근 및 브라우저 저장소 동작이 더 안정적입니다.</div>
+  </section>
+</div>
+
+<script>
+(function(){
+'use strict';
+
+const APP = { db:null, mem:{documents:[],chunks:[],workspaces:[{id:'default',name:'Default'}]}, useMemory:false, currentWs:'default' };
+const $ = (id)=>document.getElementById(id);
+const enc = new TextEncoder();
+const dec = new TextDecoder('utf-8');
+
+function setStatus(el, msg, type=''){
+  if(!el) return;
+  el.textContent = msg;
+  el.className = 'status ' + (type || '');
+  el.classList.remove('hidden');
+}
+function hide(el){ if(el) el.classList.add('hidden'); }
+function fmtBytes(n){ if(!n && n!==0) return ''; const u=['B','KB','MB','GB']; let i=0; while(n>=1024 && i<u.length-1){n/=1024;i++;} return (i? n.toFixed(1): n) + u[i]; }
+function now(){ return new Date().toISOString(); }
+function uid(prefix='id'){ return prefix + '_' + Math.random().toString(36).slice(2) + '_' + Date.now().toString(36); }
+function hashString(str){ let h=2166136261; for(let i=0;i<str.length;i++){h^=str.charCodeAt(i); h=Math.imul(h,16777619);} return (h>>>0).toString(16); }
+function escapeHtml(s){ return String(s||'').replace(/[&<>"]/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m])); }
+function stripHtml(s){ const doc=new DOMParser().parseFromString(String(s||''),'text/html'); return doc.body ? doc.body.innerText : String(s||'').replace(/<[^>]+>/g,' '); }
+
+function openDB(){
+  return new Promise((resolve)=>{
+    if(!('indexedDB' in window)){ APP.useMemory=true; return resolve(null); }
+    const req = indexedDB.open('privai_web_single_v01', 1);
+    req.onupgradeneeded = function(){
+      const db = req.result;
+      if(!db.objectStoreNames.contains('workspaces')) db.createObjectStore('workspaces',{keyPath:'id'});
+      if(!db.objectStoreNames.contains('documents')) db.createObjectStore('documents',{keyPath:'id'});
+      if(!db.objectStoreNames.contains('chunks')) db.createObjectStore('chunks',{keyPath:'id'});
+    };
+    req.onsuccess = ()=>resolve(req.result);
+    req.onerror = ()=>{ console.warn('IndexedDB unavailable; memory mode'); APP.useMemory=true; resolve(null); };
+  });
+}
+function tx(store, mode='readonly'){
+  if(APP.useMemory) return null;
+  return APP.db.transaction(store, mode).objectStore(store);
+}
+function dbPut(store, obj){
+  if(APP.useMemory){
+    const arr = APP.mem[store]; const i=arr.findIndex(x=>x.id===obj.id); if(i>=0) arr[i]=obj; else arr.push(obj); return Promise.resolve(obj);
+  }
+  return new Promise((res,rej)=>{ const r=tx(store,'readwrite').put(obj); r.onsuccess=()=>res(obj); r.onerror=()=>rej(r.error); });
+}
+function dbGetAll(store){
+  if(APP.useMemory) return Promise.resolve([...APP.mem[store]]);
+  return new Promise((res,rej)=>{ const r=tx(store).getAll(); r.onsuccess=()=>res(r.result||[]); r.onerror=()=>rej(r.error); });
+}
+function dbDelete(store,id){
+  if(APP.useMemory){ APP.mem[store]=APP.mem[store].filter(x=>x.id!==id); return Promise.resolve(); }
+  return new Promise((res,rej)=>{ const r=tx(store,'readwrite').delete(id); r.onsuccess=()=>res(); r.onerror=()=>rej(r.error); });
+}
+function dbClear(store){
+  if(APP.useMemory){ APP.mem[store]=[]; return Promise.resolve(); }
+  return new Promise((res,rej)=>{ const r=tx(store,'readwrite').clear(); r.onsuccess=()=>res(); r.onerror=()=>rej(r.error); });
+}
+
+async function ensureDefaultWorkspace(){
+  const ws = await dbGetAll('workspaces');
+  if(!ws.find(w=>w.id==='default')) await dbPut('workspaces',{id:'default',name:'Default',createdAt:now()});
+  APP.currentWs = localStorage.getItem('privai_current_ws') || 'default';
+}
+async function refreshWorkspaces(){
+  const list = await dbGetAll('workspaces');
+  if(!list.length) { await ensureDefaultWorkspace(); return refreshWorkspaces(); }
+  const select=$('workspaceSelect'); select.innerHTML='';
+  list.forEach(w=>{ const o=document.createElement('option'); o.value=w.id; o.textContent=w.name; select.appendChild(o); });
+  if(!list.find(w=>w.id===APP.currentWs)) APP.currentWs='default';
+  select.value=APP.currentWs;
+  const box=$('workspaceList');
+  box.innerHTML = list.map(w=>`<div class="item"><div class="item-title">${escapeHtml(w.name)}</div><div class="meta">${escapeHtml(w.id)} · ${escapeHtml(w.createdAt||'')}</div></div>`).join('');
+}
+async function refreshStats(){
+  const docs=(await dbGetAll('documents')).filter(d=>d.workspaceId===APP.currentWs);
+  const chunks=(await dbGetAll('chunks')).filter(c=>c.workspaceId===APP.currentWs);
+  const chars=chunks.reduce((a,c)=>a+(c.text||'').length,0);
+  setStatus($('statsBox'), `Workspace: ${APP.currentWs}\n문서: ${docs.length}개 · 청크: ${chunks.length}개 · 색인 문자수: ${chars.toLocaleString()}자${APP.useMemory?'\n주의: IndexedDB 미사용, 메모리 모드입니다. 새로고침하면 사라질 수 있습니다.':''}`, docs.length?'ok':'warn');
+}
+
+function chunkText(text){
+  text = String(text||'').replace(/\r/g,'').replace(/[ \t]+/g,' ').replace(/\n{3,}/g,'\n\n').trim();
+  const chunks=[]; const size=800, overlap=100;
+  if(!text) return chunks;
+  let i=0, n=0;
+  while(i<text.length){
+    let end=Math.min(text.length, i+size);
+    const slice=text.slice(i,end);
+    let cut=Math.max(slice.lastIndexOf('\n\n'), slice.lastIndexOf('. '), slice.lastIndexOf('다. '));
+    if(cut>300 && end<text.length) end=i+cut+1;
+    const part=text.slice(i,end).trim();
+    if(part.length>20) chunks.push({text:part, chunkNo:n++});
+    if(end>=text.length) break;
+    i=Math.max(0, end-overlap);
+  }
+  return chunks;
+}
+function extOf(name){ return (name.split('.').pop()||'').toLowerCase(); }
+function readTextFile(file){ return new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(String(r.result||'')); r.onerror=()=>rej(r.error); r.readAsText(file,'utf-8'); }); }
+function readArrayBuffer(file){ return new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(r.result); r.onerror=()=>rej(r.error); r.readAsArrayBuffer(file); }); }
+function loadScript(src, globalName){
+  if(globalName && window[globalName]) return Promise.resolve();
+  return new Promise((resolve,reject)=>{
+    const id='lib_'+hashString(src);
+    if(document.getElementById(id)){ const t=setInterval(()=>{ if(!globalName || window[globalName]){clearInterval(t);resolve();}},100); setTimeout(()=>{clearInterval(t);resolve();},8000); return; }
+    const s=document.createElement('script'); s.id=id; s.src=src; s.async=true;
+    s.onload=()=>resolve(); s.onerror=()=>reject(new Error('라이브러리 로드 실패: '+src));
+    document.head.appendChild(s);
+  });
+}
+async function parseDocx(file){
+  await loadScript('https://unpkg.com/mammoth@1.8.0/mammoth.browser.min.js','mammoth');
+  if(!window.mammoth) throw new Error('DOCX 파서(Mammoth)를 불러오지 못했습니다. 인터넷 연결을 확인하세요.');
+  const ab=await readArrayBuffer(file);
+  const out=await window.mammoth.extractRawText({arrayBuffer:ab});
+  return out.value || '';
+}
+async function parsePdf(file){
+  await loadScript('https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js','pdfjsLib');
+  if(!window.pdfjsLib) throw new Error('PDF 파서(PDF.js)를 불러오지 못했습니다. 인터넷 연결을 확인하세요.');
+  window.pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
+  const ab=await readArrayBuffer(file);
+  const pdf=await window.pdfjsLib.getDocument({data:new Uint8Array(ab)}).promise;
+  let text='';
+  for(let p=1;p<=pdf.numPages;p++){
+    const page=await pdf.getPage(p);
+    const tc=await page.getTextContent();
+    const line=tc.items.map(it=>it.str).join(' ');
+    text += `\n\n[page ${p}]\n` + line;
+  }
+  return text;
+}
+async function extractText(file){
+  const ext=extOf(file.name);
+  if(['txt','md','csv'].includes(ext)) return await readTextFile(file);
+  if(['html','htm'].includes(ext)) return stripHtml(await readTextFile(file));
+  if(ext==='docx') return await parseDocx(file);
+  if(ext==='pdf') return await parsePdf(file);
+  return await readTextFile(file);
+}
+async function indexFile(file){
+  const status=$('docStatus');
+  setStatus(status, `색인 중: ${file.name}`);
+  const id = 'doc_' + hashString(APP.currentWs+'|'+file.name+'|'+file.size+'|'+file.lastModified);
+  const text = await extractText(file);
+  if(!text || text.trim().length<1) throw new Error('텍스트를 추출하지 못했습니다: '+file.name);
+  const chunks = chunkText(text);
+  const allDocs = await dbGetAll('documents');
+  const old = allDocs.find(d=>d.id===id);
+  if(old){
+    const oldChunks=(await dbGetAll('chunks')).filter(c=>c.documentId===id);
+    for(const c of oldChunks) await dbDelete('chunks', c.id);
+  }
+  const doc={id,workspaceId:APP.currentWs,fileName:file.name,fileType:extOf(file.name),size:file.size,lastModified:file.lastModified,indexedAt:now(),chunkCount:chunks.length,charCount:text.length};
+  await dbPut('documents', doc);
+  for(const ch of chunks){
+    await dbPut('chunks',{id:uid('chunk'),workspaceId:APP.currentWs,documentId:id,fileName:file.name,fileType:doc.fileType,chunkNo:ch.chunkNo,text:ch.text,createdAt:now()});
+  }
+  return {doc,chunks:chunks.length};
+}
+async function indexFiles(files){
+  const arr=[...files];
+  if(!arr.length) return;
+  let ok=0, fail=0, messages=[];
+  for(const file of arr){
+    try{ const r=await indexFile(file); ok++; messages.push(`✓ ${file.name} (${r.chunks} chunks)`); }
+    catch(e){ fail++; messages.push(`✗ ${file.name}: ${e.message}`); console.error(e); }
+    setStatus($('docStatus'), messages.slice(-8).join('\n') + `\n진행: ${ok+fail}/${arr.length}`);
+  }
+  setStatus($('docStatus'), `색인 완료: 성공 ${ok}, 실패 ${fail}\n` + messages.join('\n'), fail?'warn':'ok');
+  await refreshDocs(); await refreshStats();
+}
+async function pickFolder(){
+  if(!window.showDirectoryPicker){ setStatus($('docStatus'),'이 브라우저는 폴더 선택 API를 지원하지 않습니다. 파일 추가를 사용하십시오.','warn'); return; }
+  try{
+    const dir=await window.showDirectoryPicker({mode:'read'});
+    const files=[];
+    async function walk(handle,path=''){
+      for await (const [name,h] of handle.entries()){
+        if(h.kind==='file'){
+          const ext=extOf(name); if(['txt','md','csv','html','htm','pdf','docx'].includes(ext)) files.push(await h.getFile());
+        } else if(h.kind==='directory') await walk(h,path+name+'/');
+      }
+    }
+    await walk(dir);
+    await indexFiles(files);
+  }catch(e){ if(e.name!=='AbortError') setStatus($('docStatus'),'폴더 선택 오류: '+e.message,'err'); }
+}
+async function refreshDocs(){
+  const docs=(await dbGetAll('documents')).filter(d=>d.workspaceId===APP.currentWs).sort((a,b)=>(b.indexedAt||'').localeCompare(a.indexedAt||''));
+  const box=$('docList');
+  if(!docs.length){ box.innerHTML='<div class="item"><div class="item-title">색인된 문서가 없습니다.</div><div class="meta">문서 폴더 추가 또는 파일 추가를 사용하세요.</div></div>'; return; }
+  box.innerHTML=docs.map(d=>`<div class="item"><div class="item-title">${escapeHtml(d.fileName)}</div><div class="meta">${escapeHtml(d.fileType)} · ${fmtBytes(d.size)} · 청크 ${d.chunkCount||0} · ${escapeHtml(d.indexedAt||'')}</div><button data-del-doc="${escapeHtml(d.id)}" class="danger">색인 삭제</button></div>`).join('');
+  box.querySelectorAll('[data-del-doc]').forEach(btn=>btn.addEventListener('click', async()=>{
+    const id=btn.getAttribute('data-del-doc');
+    const chunks=(await dbGetAll('chunks')).filter(c=>c.documentId===id);
+    for(const c of chunks) await dbDelete('chunks', c.id);
+    await dbDelete('documents', id);
+    await refreshDocs(); await refreshStats();
+  }));
+}
+function tokenize(q){
+  return String(q||'').toLowerCase().replace(/["'`~!@#$%^&*()_+=\[\]{}\\|;:,.<>/?，。！？]/g,' ').split(/\s+/).filter(t=>t.length>=2).slice(0,20);
+}
+function highlight(text, terms){
+  let s=escapeHtml(text);
+  for(const t of terms){
+    const esc=t.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+    if(!esc) continue;
+    try{s=s.replace(new RegExp('('+esc+')','ig'),'<mark>$1</mark>');}catch(e){}
+  }
+  return s;
+}
+async function search(){
+  const q=$('queryInput').value.trim();
+  const status=$('searchStatus');
+  const results=$('results');
+  if(!q){ setStatus(status,'검색어를 입력하세요.','warn'); return; }
+  setStatus(status,'검색 중...');
+  const terms=tokenize(q);
+  if(!terms.length){ setStatus(status,'두 글자 이상의 검색어를 입력하세요.','warn'); return; }
+  const chunks=(await dbGetAll('chunks')).filter(c=>c.workspaceId===APP.currentWs);
+  if(!chunks.length){ setStatus(status,'색인된 문서가 없습니다. Documents에서 먼저 파일을 추가하세요.','warn'); return; }
+  const whole=q.toLowerCase();
+  const scored=[];
+  for(const c of chunks){
+    const text=(c.text||'').toLowerCase(); let score=0;
+    if(text.includes(whole)) score += 10;
+    for(const t of terms){
+      let idx=text.indexOf(t); if(idx>=0){ score += 2; let count=0; while(idx>=0 && count<8){count++; idx=text.indexOf(t,idx+t.length);} score += count; }
+    }
+    if(score>0) scored.push({c,score});
+  }
+  scored.sort((a,b)=>b.score-a.score);
+  const top=scored.slice(0,20);
+  if(!top.length){ setStatus(status,`검색 결과가 없습니다. 검색어: ${terms.join(', ')}`,'warn'); results.innerHTML=''; return; }
+  setStatus(status,`검색 결과 ${top.length}개 표시 / 전체 매칭 ${scored.length}개`, 'ok');
+  results.innerHTML = top.map((r,i)=>`<div class="item result"><div class="item-title">${i+1}. ${escapeHtml(r.c.fileName)} <span class="pill">score ${r.score}</span></div><div class="meta">chunk ${r.c.chunkNo}</div><div>${highlight(r.c.text.slice(0,1400), terms)}</div></div>`).join('');
+}
+async function clearCurrentWorkspace(){
+  if(!confirm('현재 Workspace의 문서 색인을 삭제할까요? 원본 파일은 삭제하지 않습니다.')) return;
+  const docs=(await dbGetAll('documents')).filter(d=>d.workspaceId===APP.currentWs);
+  const chunks=(await dbGetAll('chunks')).filter(c=>c.workspaceId===APP.currentWs);
+  for(const c of chunks) await dbDelete('chunks', c.id);
+  for(const d of docs) await dbDelete('documents', d.id);
+  await refreshDocs(); await refreshStats(); setStatus($('docStatus'),'현재 Workspace 색인을 삭제했습니다.','ok');
+}
+async function exportWorkspace(){
+  const data={app:'PrivAI Web v0.1 Single',workspace:APP.currentWs,exportedAt:now(),documents:(await dbGetAll('documents')).filter(d=>d.workspaceId===APP.currentWs),chunks:(await dbGetAll('chunks')).filter(c=>c.workspaceId===APP.currentWs)};
+  const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='privai_export_'+APP.currentWs+'.json'; a.click(); URL.revokeObjectURL(a.href);
+}
+async function resetAll(){
+  if(!confirm('PrivAI의 전체 로컬 데이터를 삭제할까요?')) return;
+  await dbClear('chunks'); await dbClear('documents'); await dbClear('workspaces');
+  localStorage.removeItem('privai_current_ws');
+  await ensureDefaultWorkspace(); await refreshAll(); setStatus($('settingsStatus'),'전체 로컬 데이터를 삭제했습니다.','ok');
+}
+async function addWorkspace(){
+  const name=$('newWorkspaceName').value.trim(); if(!name) return;
+  const id='ws_'+hashString(name+'_'+Date.now());
+  await dbPut('workspaces',{id,name,createdAt:now()}); APP.currentWs=id; localStorage.setItem('privai_current_ws',id); $('newWorkspaceName').value=''; await refreshAll(); setStatus($('workspaceStatus'),'Workspace 추가: '+name,'ok');
+}
+async function deleteWorkspace(){
+  if(APP.currentWs==='default'){ setStatus($('workspaceStatus'),'Default Workspace는 삭제할 수 없습니다.','warn'); return; }
+  if(!confirm('현재 Workspace와 색인을 삭제할까요?')) return;
+  const ws=APP.currentWs; const docs=(await dbGetAll('documents')).filter(d=>d.workspaceId===ws); const chunks=(await dbGetAll('chunks')).filter(c=>c.workspaceId===ws);
+  for(const c of chunks) await dbDelete('chunks', c.id); for(const d of docs) await dbDelete('documents', d.id); await dbDelete('workspaces', ws);
+  APP.currentWs='default'; localStorage.setItem('privai_current_ws','default'); await refreshAll();
+}
+function detectCapabilities(){
+  const caps=[];
+  caps.push('IndexedDB: '+(('indexedDB' in window)?'가능':'불가'));
+  caps.push('Folder API: '+(('showDirectoryPicker' in window)?'가능':'불가'));
+  caps.push('WebGPU: '+(('gpu' in navigator)?'가능':'불가'));
+  caps.push('Online: '+(navigator.onLine?'예':'아니오'));
+  setStatus($('capabilityBox'), caps.join('\n'), '');
+}
+async function refreshAll(){ await refreshWorkspaces(); await refreshStats(); await refreshDocs(); detectCapabilities(); }
+function bind(){
+  document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>{
+    document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active')); b.classList.add('active');
+    document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active')); $(b.dataset.tab).classList.add('active');
+  }));
+  $('workspaceSelect').addEventListener('change', async(e)=>{ APP.currentWs=e.target.value; localStorage.setItem('privai_current_ws',APP.currentWs); await refreshAll(); });
+  $('refreshStatsBtn').addEventListener('click', refreshStats);
+  $('searchBtn').addEventListener('click', search);
+  $('queryInput').addEventListener('keydown', e=>{ if((e.ctrlKey||e.metaKey) && e.key==='Enter') search(); });
+  $('clearResultsBtn').addEventListener('click',()=>{ $('results').innerHTML=''; hide($('searchStatus')); });
+  $('pickFolderBtn').addEventListener('click', pickFolder);
+  $('fileInput').addEventListener('change', e=>indexFiles(e.target.files));
+  $('listDocsBtn').addEventListener('click', refreshDocs);
+  $('clearDocsBtn').addEventListener('click', clearCurrentWorkspace);
+  $('addWorkspaceBtn').addEventListener('click', addWorkspace);
+  $('deleteWorkspaceBtn').addEventListener('click', deleteWorkspace);
+  $('exportBtn').addEventListener('click', exportWorkspace);
+  $('resetAllBtn').addEventListener('click', resetAll);
+}
+async function init(){
+  bind();
+  APP.db = await openDB();
+  await ensureDefaultWorkspace();
+  await refreshAll();
+  setStatus($('docStatus'),'준비 완료. 파일 또는 폴더를 추가하세요.','ok');
+}
+window.addEventListener('DOMContentLoaded', init);
+})();
+</script>
+</body>
+</html>
