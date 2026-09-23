@@ -344,6 +344,7 @@
         <span class="pill amber">WebGPU 필요</span>
       </div>
       <div class="status info" id="modelStatus">환경 확인 중...</div>
+      <div class="status" id="deviceCapabilityStatus" style="margin-top:6px">기기 성능 정보를 아직 수집하지 않았습니다.</div>
       <hr class="divider">
       <div class="row" style="flex-wrap:wrap;gap:8px">
         <div class="row tight grow">
@@ -464,6 +465,8 @@ const state = {
   webllm: null,
   llmEngine: null,
   llmReady: false,
+  selectedModel: '',
+  deviceCapabilities: null,
   abortAnswer: false,
   chatHistory: [],       // 대화 기록 (세션)
   memory: { workspaces: [DEFAULT_WS], documents: [], chunks: [], settings: {} }
@@ -945,23 +948,85 @@ async function probeWebGPU(){
   try{ const a=await navigator.gpu.requestAdapter(); if(!a) return {ok:false,reason:'adapter 없음'}; return {ok:true,reason:'adapter 확인됨'}; }
   catch(e){ return {ok:false,reason:e.message||String(e)}; }
 }
-function selectAndroidStableModel(){
-  const sel=$('llmModelSelect'); if(!sel) return '';
-  if(isAndroidDevice()&&!sel.value.includes('q4f32_1')){
-    if(Array.from(sel.options).some(o=>o.value==='Qwen2.5-0.5B-Instruct-q4f32_1-MLC')){
-      sel.value='Qwen2.5-0.5B-Instruct-q4f32_1-MLC';
-      setStatus('llmProgress','Android 안정화: 모델을 Qwen2.5 0.5B q4f32_1로 자동 변경했습니다.','warn');
-    }
-  }
-  return sel.value;
+const WEBLLM_MODEL_CANDIDATES={
+  high:'Qwen2.5-1.5B-Instruct-q4f16_1-MLC',
+  medium:'Qwen2.5-0.5B-Instruct-q4f32_1-MLC',
+  unknown:'Qwen2.5-0.5B-Instruct-q4f32_1-MLC'
+};
+async function readAdapterInfo(adapter){
+  try{
+    let info=adapter&&adapter.info;
+    if(info&&typeof info.then==='function') info=await info;
+    if(!info&&adapter&&typeof adapter.requestAdapterInfo==='function') info=await adapter.requestAdapterInfo();
+    if(!info) return null;
+    const {vendor,architecture,device,description}=info;
+    return {vendor:vendor||'',architecture:architecture||'',device:device||'',description:description||''};
+  }catch(_){ return null; }
 }
-function updateModelStatus(){
-  const gpu=hasWebGPU(); const likely=!!window.isSecureContext||isLocalhost()||isHttpsDomain();
+async function collectDeviceCapabilities(){
+  const caps={
+    webgpuPresent:!!navigator.gpu, adapterAcquired:false, deviceAcquired:false,
+    limits:null, deviceMemory:typeof navigator.deviceMemory==='number'?navigator.deviceMemory:null,
+    hardwareConcurrency:typeof navigator.hardwareConcurrency==='number'?navigator.hardwareConcurrency:null,
+    mobile:/Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent||''), adapterInfo:null, error:''
+  };
+  if(!caps.webgpuPresent){ caps.error='navigator.gpu 없음'; return caps; }
+  try{
+    const adapter=await navigator.gpu.requestAdapter();
+    if(!adapter){ caps.error='GPU adapter 획득 실패'; return caps; }
+    caps.adapterAcquired=true;
+    caps.limits=Object.fromEntries(Object.entries(adapter.limits||{}));
+    caps.adapterInfo=await readAdapterInfo(adapter);
+    try{
+      const device=await adapter.requestDevice();
+      caps.deviceAcquired=!!device;
+      if(device&&typeof device.destroy==='function') device.destroy();
+      if(!caps.deviceAcquired) caps.error='GPU device 생성 실패';
+    }catch(e){ caps.error='GPU device 생성 실패: '+(e?.message||String(e)); }
+  }catch(e){ caps.error='GPU adapter 요청 실패: '+(e?.message||String(e)); }
+  return caps;
+}
+function classifyDevicePerformance(caps){
+  if(!caps||typeof caps!=='object') return 'unknown';
+  if(!caps.webgpuPresent||!caps.adapterAcquired||!caps.deviceAcquired) return 'low';
+  const memory=caps.deviceMemory, cpu=caps.hardwareConcurrency;
+  const limits=caps.limits||{};
+  const limitsSufficient=(Number(limits.maxBufferSize||0)>=268435456 && Number(limits.maxStorageBufferBindingSize||0)>=134217728)
+    || (Number(limits.maxComputeWorkgroupStorageSize||0)>=16384 && Number(limits.maxBindGroups||0)>=4);
+  if(caps.mobile && ((memory!==null&&memory<6)||(cpu!==null&&cpu<6))) return 'low';
+  if(memory!==null&&memory<4) return 'low';
+  if((memory!==null&&memory>=8)||(limitsSufficient&&cpu!==null&&cpu>=8)) return 'high';
+  if(caps.webgpuPresent&&caps.adapterAcquired&&caps.deviceAcquired) return 'medium';
+  return 'unknown';
+}
+function selectWebLLMModel(caps){
+  const grade=classifyDevicePerformance(caps);
+  return {grade,model:WEBLLM_MODEL_CANDIDATES[grade]||'',useWebLLM:grade!=='low',fallbackAvailable:true};
+}
+function applySelectedModel(selection){
+  const sel=$('llmModelSelect'); if(!sel) return '';
+  if(selection?.model&&Array.from(sel.options).some(o=>o.value===selection.model)){
+    sel.value=selection.model;
+    state.selectedModel=selection.model;
+  }
+  return state.selectedModel||sel.value;
+}
+function renderDeviceCapabilityStatus(caps,selection){
+  const webgpu=caps?.webgpuPresent&&caps?.adapterAcquired&&caps?.deviceAcquired;
+  const memory=caps?.deviceMemory===null||caps?.deviceMemory===undefined?'알 수 없음':caps.deviceMemory+' GB';
+  const cpu=caps?.hardwareConcurrency??'알 수 없음';
+  const adapter=caps?.adapterInfo?Object.values(caps.adapterInfo).filter(Boolean).join(' / '):'알 수 없음';
+  const limits=caps?.limits?`maxBufferSize ${caps.limits.maxBufferSize||'?'}, maxBindGroups ${caps.limits.maxBindGroups||'?'}`:'알 수 없음';
+  const msg=`기기 등급: ${selection.grade}\nWebGPU: ${webgpu?'사용 가능':'사용 불가'}\n선택 모델: ${selection.model||'WebLLM 미사용 (추출형)'}\nfallback: 사용 가능\n메모리: ${memory} | CPU: ${cpu} | 모바일: ${caps?.mobile?'예':'아니오'}\nAdapter: ${adapter}\nLimits: ${limits}${caps?.error?'\n확인 결과: '+caps.error:''}`;
+  setStatus('deviceCapabilityStatus',msg,selection.grade==='low'?'warn':webgpu?'ok':'warn');
+}
+function updateModelStatus(caps=state.deviceCapabilities){
+  const gpu=!!caps?.webgpuPresent; const readyGpu=!!(caps?.adapterAcquired&&caps?.deviceAcquired); const likely=!!window.isSecureContext||isLocalhost()||isHttpsDomain();
   const loaded=state.llmReady?'✓ 로드됨':'미로드';
-  const canTry=gpu&&likely;
+  const canTry=readyGpu&&likely;
   const msg=`현재 주소: ${location.href}
 Secure Context: ${window.isSecureContext?'예':'아니오'} | Protocol: ${location.protocol}
-WebGPU: ${gpu?'지원':'미지원'} | WebLLM: ${loaded} | Android: ${isAndroidDevice()?'예':'아니오'}
+WebGPU API: ${gpu?'감지':'없음'} | adapter/device: ${readyGpu?'확인됨':'미확인'} | WebLLM: ${loaded} | Android: ${isAndroidDevice()?'예':'아니오'}
 ${webLLMRunHint()}`;
   setStatus('modelStatus',msg,canTry?'ok':'warn');
   const howMsg=canTry
@@ -969,12 +1034,21 @@ ${webLLMRunHint()}`;
     :'현재 주소에서는 WebLLM을 실행하지 않습니다. content://·file://·일반 http에서는 차단됩니다.';
   if($('webllmHowTo')) setStatus('webllmHowTo',howMsg,canTry?'ok':'warn');
 }
-async function loadWebLLM(){
-  updateModelStatus();
+async function refreshDeviceModelStatus(){
+  const caps=await collectDeviceCapabilities();
+  const selection=selectWebLLMModel(caps);
+  state.deviceCapabilities=caps;
+  applySelectedModel(selection);
+  renderDeviceCapabilityStatus(caps,selection);
+  updateModelStatus(caps);
+  return {caps,selection};
+}
+async function loadSelectedModel(caps){
+  const selection=selectWebLLMModel(caps);
+  applySelectedModel(selection);
+  if(!selection.useWebLLM) throw new Error('기기 등급이 low입니다. WebLLM을 강제하지 않고 추출형 답변을 사용합니다.');
   if(!isStrictWebLLMContext()) throw new Error('WebLLM 안전 환경이 아닙니다. HTTPS 도메인 또는 localhost에서 실행하십시오.');
-  if(!hasWebGPU()) throw new Error('navigator.gpu가 없습니다. Android Chrome 최신 버전과 HTTPS/localhost 실행을 확인하십시오.');
-  const gpuProbe=await probeWebGPU();
-  if(!gpuProbe.ok) throw new Error('WebGPU 초기화 실패: '+gpuProbe.reason);
+  if(!caps.webgpuPresent||!caps.adapterAcquired||!caps.deviceAcquired) throw new Error('WebGPU 초기화 실패: '+(caps.error||'adapter/device 확인 실패'));
   if(!state.webllm){
     setStatus('llmProgress','WebLLM 모듈 로드 중...','info');
     const cdns=['https://esm.run/@mlc-ai/web-llm','https://cdn.jsdelivr.net/npm/@mlc-ai/web-llm/+esm'];
@@ -985,7 +1059,7 @@ async function loadWebLLM(){
     }
     if(!state.webllm) throw new Error('WebLLM 모듈 로드 실패: '+(lastErr?.message||'unknown'));
   }
-  const model=selectAndroidStableModel();
+  const model=applySelectedModel(selection);
   setStatus('llmProgress',`모델 로드 중: ${model}\n첫 실행은 다운로드로 인해 오래 걸릴 수 있습니다. Wi-Fi 권장.`,'info');
   const initProgressCallback=(p)=>{
     let text='';
@@ -1001,7 +1075,11 @@ async function loadWebLLM(){
   } else { throw new Error('WebLLM API 미지원: CreateMLCEngine/MLCEngine 없음'); }
   state.llmReady=true;
   setStatus('llmProgress',`✓ 준비 완료: ${model}\nChat에서 "AI 답변" 버튼을 누르면 로컬 AI 답변이 생성됩니다.`,'ok');
-  updateModelStatus();
+  updateModelStatus(caps);
+}
+async function loadWebLLM(){
+  const {caps}=await refreshDeviceModelStatus();
+  return loadSelectedModel(caps);
 }
 function structureNetworkQuestion(question){
   const originalQuestion=String(question||'').trim();
@@ -1539,7 +1617,10 @@ function bindEvents(){
   });
 
   // Models
-  $('checkWebLLMBtn').addEventListener('click',updateModelStatus);
+  $('checkWebLLMBtn').addEventListener('click',async()=>{
+    try{ await refreshDeviceModelStatus(); }
+    catch(e){ setStatus('deviceCapabilityStatus','기기 성능 확인 실패: '+(e.message||String(e)),'err'); }
+  });
   $('loadModelBtn').addEventListener('click',async()=>{ try{await loadWebLLM();}catch(e){setStatus('llmProgress',e.message,'err');updateModelStatus();} });
   $('resetWebLLMBtn').addEventListener('click',resetWebLLM);
 
@@ -1573,7 +1654,10 @@ async function init(){
   await ensureDefaultWorkspace();
   await loadSettings();
   updateEnv();
-  updateModelStatus();
+  refreshDeviceModelStatus().catch(e=>{
+    setStatus('deviceCapabilityStatus','기기 성능 확인 실패: '+(e.message||String(e)),'err');
+    updateModelStatus();
+  });
   await refreshAll();
   setStatus('docStatus','파일 추가 또는 폴더 추가를 사용하십시오.','');
   // 기존 256차원 임베딩 감지 → 재생성 안내
